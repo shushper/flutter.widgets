@@ -9,6 +9,7 @@ import 'package:collection/collection.dart' show IterableExtension;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
+import 'package:scrollable_positioned_list/src/alignment_position.dart';
 
 import 'item_positions_listener.dart';
 import 'item_positions_notifier.dart';
@@ -219,6 +220,7 @@ class ItemScrollController {
   Future<void> scrollTo({
     required int index,
     double alignment = 0,
+    AlignmentPosition? alignmentPosition,
     required Duration duration,
     Curve curve = Curves.linear,
     List<double> opacityAnimationWeights = const [40, 20, 40],
@@ -229,6 +231,7 @@ class ItemScrollController {
     return _scrollableListState!._scrollTo(
       index: index,
       alignment: alignment,
+      alignmentPosition: alignmentPosition,
       duration: duration,
       curve: curve,
       opacityAnimationWeights: opacityAnimationWeights,
@@ -414,6 +417,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
   Future<void> _scrollTo({
     required int index,
     required double alignment,
+    AlignmentPosition? alignmentPosition,
     required Duration duration,
     Curve curve = Curves.linear,
     required List<double> opacityAnimationWeights,
@@ -427,6 +431,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
         _startScroll(
           index: index,
           alignment: alignment,
+          alignmentPosition: alignmentPosition,
           duration: duration,
           curve: curve,
           opacityAnimationWeights: opacityAnimationWeights,
@@ -436,6 +441,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
       await _startScroll(
         index: index,
         alignment: alignment,
+        alignmentPosition: alignmentPosition,
         duration: duration,
         curve: curve,
         opacityAnimationWeights: opacityAnimationWeights,
@@ -446,6 +452,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
   Future<void> _startScroll({
     required int index,
     required double alignment,
+    AlignmentPosition? alignmentPosition,
     required Duration duration,
     Curve curve = Curves.linear,
     required List<double> opacityAnimationWeights,
@@ -454,19 +461,43 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
     final itemPosition = primary.itemPositionsNotifier.itemPositions.value
         .firstWhereOrNull(
             (ItemPosition itemPosition) => itemPosition.index == index);
+
     if (itemPosition != null) {
       // Scroll directly.
-      final localScrollAmount = itemPosition.itemLeadingEdge *
-          primary.scrollController.position.viewportDimension;
-      await primary.scrollController.animateTo(
-          primary.scrollController.offset +
-              localScrollAmount -
-              alignment * primary.scrollController.position.viewportDimension,
-          duration: duration,
-          curve: curve);
+      final itemLeadingEdge = itemPosition.itemLeadingEdge;
+      final itemTrailingEdge = itemPosition.itemTrailingEdge;
+      final viewportDimension = primary.scrollController.position.viewportDimension;
+      final localScrollAmount = itemLeadingEdge * viewportDimension;
+      final scrollControllerOffset = primary.scrollController.offset;
+
+      double alignmentOffset;
+
+      if (alignmentPosition != null) {
+        switch (alignmentPosition) {
+          case AlignmentPosition.center:
+            final itemWidth = (itemTrailingEdge - itemLeadingEdge) * viewportDimension;
+            alignmentOffset = (viewportDimension - itemWidth) / 2;
+            break;
+          case AlignmentPosition.left:
+            alignmentOffset = 0;
+            break;
+          case AlignmentPosition.right:
+            final itemWidth = (itemTrailingEdge - itemLeadingEdge) * viewportDimension;
+            alignmentOffset = viewportDimension - itemWidth;
+            break;
+        }
+      } else {
+        alignmentOffset = alignment * viewportDimension;
+      }
+
+      final offset = scrollControllerOffset + localScrollAmount - alignmentOffset;
+
+      await primary.scrollController.animateTo(offset, duration: duration, curve: curve);
     } else {
-      final scrollAmount = _screenScrollCount *
-          primary.scrollController.position.viewportDimension;
+
+      final viewportDimension = primary.scrollController.position.viewportDimension;
+      final scrollAmount = _screenScrollCount * viewportDimension;
+
       final startCompleter = Completer<void>();
       final endCompleter = Completer<void>();
       startAnimationCallback = () {
@@ -475,16 +506,27 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
 
           opacity.parent = _opacityAnimation(opacityAnimationWeights).animate(
               AnimationController(vsync: this, duration: duration)..forward());
-          secondary.scrollController.jumpTo(-direction *
-              (_screenScrollCount *
-                      primary.scrollController.position.viewportDimension -
-                  alignment *
-                      secondary.scrollController.position.viewportDimension));
+
+          secondary.scrollController.jumpTo(-direction * (_screenScrollCount * primary.scrollController.position.viewportDimension - alignment * secondary.scrollController.position.viewportDimension));
+          print('----- Secondary jump to -----');
+          print('Direction: ${-direction}');
+          print('Screen scroll count: $_screenScrollCount');
+          print('Primary viewport dimension: ${primary.scrollController.position.viewportDimension}');
+          print('Alignment: $alignment');
+          print('Secondary viewport dimension: ${secondary.scrollController.position.viewportDimension}');
+          print('Jump to: ${-direction * (_screenScrollCount * primary.scrollController.position.viewportDimension - alignment * secondary.scrollController.position.viewportDimension)}');
+
+          print('----- Primary animate to -----');
+          print('Offset: ${primary.scrollController.offset}');
+          print('Direction: $direction');
+          print('Scroll amount: $scrollAmount');
+          print('Animate to: ${primary.scrollController.offset + direction * scrollAmount}');
 
           startCompleter.complete(primary.scrollController.animateTo(
               primary.scrollController.offset + direction * scrollAmount,
               duration: duration,
               curve: curve));
+
           endCompleter.complete(secondary.scrollController
               .animateTo(0, duration: duration, curve: curve));
         });
